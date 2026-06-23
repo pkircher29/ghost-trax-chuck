@@ -3,6 +3,10 @@
 import sys
 from pathlib import Path
 
+# Locate the demucs package and bundle its remote/ data folder
+import demucs
+remote_dir = Path(demucs.__file__).parent / "remote"
+
 block_cipher = None
 base_path = Path(SPECPATH)
 
@@ -13,17 +17,26 @@ a = Analysis(
     [str(base_path / 'src' / 'separator.py')],
     pathex=[str(base_path), str(base_path / 'src')],
     binaries=[(ffmpeg_path, '.')],
-    datas=[],
+    datas=[(str(remote_dir), 'demucs/remote')],
     hiddenimports=[
+        'numpy.core.multiarray',
+        'numpy.core._multiarray_umath',
+        'scipy',
+        'scipy.io',
+        'scipy.io.wavfile',
         'demucs.apply',
         'demucs.audio',
         'demucs.pretrained',
-        'demucs.model',
         'demucs.hdemucs',
+        'demucs.htdemucs',
         'demucs.solver',
         'demucs.utils',
+        'demucs.states',
+        'demucs.repo',
+        'demucs.distrib',
         'torch',
         'torchaudio',
+        'tqdm',
     ],
     hookspath=[],
     hooksconfig={},

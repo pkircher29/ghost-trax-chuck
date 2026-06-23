@@ -9,7 +9,12 @@ Built on [Demucs](https://github.com/facebookresearch/demucs) (Meta AI). Support
 
 ## Quick start (source)
 
+Requires Python 3.12, ffmpeg, and dependencies:
+
 ```bash
+python3 -m pip install torch==2.6.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu
+python3 -m pip install demucs scipy pyinstaller
+
 python3 src/separator.py                    # GUI mode
 python3 src/separator.py input.mp3          # CLI mode
 python3 src/separator.py input.mp3 -o ./out # specify output folder

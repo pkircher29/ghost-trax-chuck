@@ -12,10 +12,10 @@ try:
     from demucs.apply import apply_model
     from demucs.audio import AudioFile, save_audio
     from demucs.pretrained import get_model
-    from demucs.model import load_model
     DEMUCS_AVAILABLE = True
-except Exception:
+except Exception as _demucs_err:
     DEMUCS_AVAILABLE = False
+    _DEMUCS_IMPORT_ERROR = str(_demucs_err)
 
 
 def get_ffmpeg_path() -> str:
@@ -89,9 +89,13 @@ def separate_file(
             progress_callback("Separating stems...")
 
         audio = AudioFile(wav_path).read(streams=0, channels=2)
+        if audio.dim() == 2:
+            audio = audio.unsqueeze(0)
         sources = apply_model(model_obj, audio, device=device, progress=True)
 
-        # sources shape: (sources, channels, time)
+        # sources shape: (batch, sources, channels, time) or (sources, channels, time)
+        if sources.dim() == 4:
+            sources = sources[0]
         sample_rate = model_obj.samplerate
         stem_names = model_obj.sources
 
@@ -111,11 +115,33 @@ def separate_file(
         vocals_path = output_dir / f"{base_name}_vocals.wav"
         music_path = output_dir / f"{base_name}_music.wav"
 
-        save_audio(vocals, str(vocals_path), samplerate=sample_rate)
+        # Save stems with fallback if torchaudio backend is missing
+        try:
+            save_audio(vocals, str(vocals_path), samplerate=sample_rate)
+        except Exception:
+            _save_wav_scipy(vocals, str(vocals_path), sample_rate)
         if music is not None:
-            save_audio(music, str(music_path), samplerate=sample_rate)
+            try:
+                save_audio(music, str(music_path), samplerate=sample_rate)
+            except Exception:
+                _save_wav_scipy(music, str(music_path), sample_rate)
 
         return vocals_path, music_path
+
+
+def _save_wav_scipy(tensor, path: str, samplerate: int):
+    """Fallback WAV writer using scipy, which is already bundled with torch."""
+    import scipy.io.wavfile
+    import numpy as np
+    arr = tensor.detach().cpu().numpy()
+    if arr.ndim == 1:
+        arr = arr[None, :]
+    arr = arr.T
+    if arr.dtype != np.int16 and arr.dtype != np.float32:
+        # normalize float to int16
+        arr = np.clip(arr, -1.0, 1.0)
+        arr = (arr * 32767).astype(np.int16)
+    scipy.io.wavfile.write(path, samplerate, arr)
 
 
 def run_cli():
