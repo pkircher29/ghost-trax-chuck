@@ -1,5 +1,5 @@
 #!/bin/bash
-# build.sh — Build StemSeparator single-file executable.
+# build.sh — Build GhostTrax single-file executable.
 
 set -euo pipefail
 
@@ -21,7 +21,7 @@ if ! python3 -m PyInstaller --version &> /dev/null; then
 fi
 
 # Build single-file executable
-python3 -m PyInstaller StemSeparator.spec --clean
+python3 -m PyInstaller GhostTrax.spec --clean
 
-echo "Build complete. Output: dist/StemSeparator"
+echo "Build complete. Output: dist/GhostTrax"
 ls -lh dist/

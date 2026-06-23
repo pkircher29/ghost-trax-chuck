@@ -10,8 +10,8 @@ remote_dir = Path(demucs.__file__).parent / "remote"
 block_cipher = None
 base_path = Path(SPECPATH)
 
-# ffmpeg.exe must be placed next to this spec before building
-ffmpeg_path = str(base_path / 'ffmpeg.exe')
+# Locate bundled ffmpeg binary
+ffmpeg_path = "/usr/bin/ffmpeg"
 
 a = Analysis(
     [str(base_path / 'src' / 'separator.py')],
@@ -19,11 +19,21 @@ a = Analysis(
     binaries=[(ffmpeg_path, '.')],
     datas=[(str(remote_dir), 'demucs/remote')],
     hiddenimports=[
+        'typing',
         'numpy.core.multiarray',
         'numpy.core._multiarray_umath',
         'scipy',
         'scipy.io',
         'scipy.io.wavfile',
+        'faster_whisper',
+        'faster_whisper.transcribe',
+        'faster_whisper.tokenizer',
+        'faster_whisper.utils',
+        'ctranslate2',
+        'onnxruntime',
+        'tokenizers',
+        'av',
+        'huggingface_hub',
         'demucs.apply',
         'demucs.audio',
         'demucs.pretrained',
@@ -37,6 +47,8 @@ a = Analysis(
         'torch',
         'torchaudio',
         'tqdm',
+        'PIL',
+        'PIL.Image',
     ],
     hookspath=[],
     hooksconfig={},
@@ -57,14 +69,14 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='StemSeparator',
+    name='GhostTrax',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

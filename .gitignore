@@ -1,3 +1,4 @@
+.gitignore
 build/
 dist/
 *.pyc
@@ -6,5 +7,5 @@ __pycache__/
 ffmpeg.exe
 ffmpeg.zip
 ffmpeg-*/
-StemSeparator_Setup.exe
+GhostTrax_Setup.exe
 .env

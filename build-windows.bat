@@ -1,5 +1,5 @@
 @echo off
-REM build-windows.bat — Build StemSeparator EXE and NSIS installer on Windows.
+REM build-windows.bat — Build GhostTrax EXE and NSIS installer on Windows.
 
 setlocal
 
@@ -12,9 +12,9 @@ if not exist ffmpeg.exe (
     for /d %%D in (ffmpeg-*) do copy "%%D\bin\ffmpeg.exe" ffmpeg.exe
 )
 
-python -m pip install pyinstaller demucs
+python -m pip install pyinstaller demucs scipy faster-whisper
 
-python -m PyInstaller StemSeparator-windows.spec --clean
+python -m PyInstaller GhostTrax-windows.spec --clean
 
 if exist "%ProgramFiles(x86)%\NSIS\makensis.exe" (
     "%ProgramFiles(x86)%\NSIS\makensis.exe" installer.nsi
