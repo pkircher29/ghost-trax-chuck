@@ -1,0 +1,10 @@
+build/
+dist/
+*.pyc
+__pycache__/
+.venv/
+ffmpeg.exe
+ffmpeg.zip
+ffmpeg-*/
+StemSeparator_Setup.exe
+.env
