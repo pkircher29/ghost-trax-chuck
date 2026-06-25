@@ -65,7 +65,10 @@ jobs:
           python -m pip install demucs faster-whisper scipy pyinstaller pillow
 
       - name: Build EXE and installer
-        run: .\build-windows.bat
+        run: |
+          choco install nsis -y
+          $env:PATH += ";C:\Program Files (x86)\NSIS"
+          .\build-windows.bat
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
