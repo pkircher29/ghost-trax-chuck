@@ -35,7 +35,7 @@ PACKETS_PER_SECOND = 300
 PALETTE = [
     (0, 0, 0),         # 0 black  (background / color0 default)
     (15, 15, 15),      # 1 white  (text / color1 default)
-    (0, 0, 15),        # 2 blue   (active line)
+    (0, 15, 0),        # 2 bright green (active line)
     (8, 8, 8),         # 3 gray   (unused)
     (0, 0, 0),
     (0, 0, 0),
