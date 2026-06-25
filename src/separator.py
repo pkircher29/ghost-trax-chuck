@@ -526,6 +526,13 @@ def run_gui():
 
 
 def main():
+    # PyInstaller windowed builds set sys.stdout/stderr to None on Windows.
+    # Redirect to a null writer so any library print() calls don't crash.
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+
     if len(sys.argv) > 1:
         run_cli()
     else:
