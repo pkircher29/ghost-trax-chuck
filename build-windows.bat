@@ -10,6 +10,7 @@ if not exist ffmpeg.exe (
     powershell -Command "Invoke-WebRequest -Uri https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip"
     powershell -Command "Expand-Archive -Path ffmpeg.zip -DestinationPath . -Force"
     for /d %%D in (ffmpeg-*) do copy "%%D\bin\ffmpeg.exe" ffmpeg.exe
+    for /d %%D in (ffmpeg-*) do copy "%%D\bin\ffprobe.exe" ffprobe.exe
     del /q ffmpeg.zip
     for /d %%D in (ffmpeg-*) do rmdir /s /q "%%D"
 )

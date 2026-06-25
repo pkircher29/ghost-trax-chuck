@@ -57,6 +57,18 @@ def get_ffmpeg_path() -> str:
     return "ffmpeg"
 
 
+def get_ffprobe_path(ffmpeg: str) -> str:
+    """Return bundled ffprobe next to ffmpeg, otherwise system ffprobe."""
+    base = Path(ffmpeg).parent
+    bundled = base / "ffprobe"
+    if bundled.exists():
+        return str(bundled)
+    bundled = base / "ffprobe.exe"
+    if bundled.exists():
+        return str(bundled)
+    return str(ffmpeg).replace("ffmpeg", "ffprobe")
+
+
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', "_", name)
 
@@ -235,22 +247,33 @@ def transcribe_words(
 
 
 def get_audio_duration(path: Path, ffmpeg: str) -> float:
-    """Get audio duration in seconds using ffprobe."""
-    ffprobe = ffmpeg.replace("ffmpeg", "ffprobe")
+    """Get audio duration in seconds using ffprobe, falling back to ffmpeg."""
+    ffprobe = get_ffprobe_path(ffmpeg)
+    if ffprobe != ffmpeg and Path(ffprobe).exists():
+        cmd = [
+            ffprobe, "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            try:
+                return float(result.stdout.strip())
+            except ValueError:
+                pass
+
+    # Fallback: parse duration from ffmpeg's stderr
     cmd = [
-        ffprobe, "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        str(path),
+        ffmpeg, "-y", "-i", str(path),
+        "-f", "null", "-",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        # Fallback: use ffmpeg output duration parsing
-        return 0.0
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        return 0.0
+    match = re.search(r"Duration:\s+(\d+):(\d+):([\d.]+)", result.stderr)
+    if match:
+        h, m, s = map(float, match.groups())
+        return h * 3600 + m * 60 + s
+    return 0.0
 
 
 def make_karaoke_zip(
