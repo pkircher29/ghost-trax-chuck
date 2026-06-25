@@ -35,7 +35,7 @@ a = Analysis(
     [str(base_path / 'src' / 'separator.py')],
     pathex=[str(base_path), str(base_path / 'src')],
     binaries=[],
-    datas=[(str(remote_dir), 'demucs/remote'), (str(base_path / 'src' / 'LiberationSans-Bold.ttf'), 'src')],
+    datas=[(str(remote_dir), 'demucs/remote')],
     hiddenimports=hiddenimports_common,
     hookspath=[],
     hooksconfig={},
