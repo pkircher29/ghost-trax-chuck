@@ -38,6 +38,7 @@ from cdg_renderer import (
     Word,
     build_cdg_from_words,
     clean_words_for_display,
+    write_lyrics_txt,
 )
 
 
@@ -313,12 +314,19 @@ def make_karaoke_zip(
             # Empty CDG
             build_cdg_from_words([], duration, cdg_path)
 
-        # 5. Zip
+        # 5. Write human-readable lyrics text file
+        if words:
+            txt_path = write_lyrics_txt(words, work_dir / f"{base_name}.txt")
+        else:
+            txt_path = write_lyrics_txt([], work_dir / f"{base_name}.txt")
+
+        # 6. Zip
         zip_path = output_dir / f"{base_name}.zip"
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(music_mp3, music_mp3.name)
             zf.write(vocals_mp3, vocals_mp3.name)
             zf.write(cdg_path, cdg_path.name)
+            zf.write(txt_path, txt_path.name)
 
         return zip_path
 

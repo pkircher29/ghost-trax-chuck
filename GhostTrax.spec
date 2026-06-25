@@ -7,49 +7,36 @@ from pathlib import Path
 import demucs
 remote_dir = Path(demucs.__file__).parent / "remote"
 
-block_cipher = None
-base_path = Path(SPECPATH)
+base_path = Path(SPECPATH).resolve()
 
-# Locate bundled ffmpeg binary
-ffmpeg_path = "/usr/bin/ffmpeg"
+block_cipher = None
+
+hiddenimports_common = [
+    'typing',
+    'scipy',
+    'scipy.io',
+    'scipy.io.wavfile',
+    'faster_whisper',
+    'demucs',
+    'demucs.pretrained',
+    'demucs.model',
+    'demucs.utils',
+    'demucs.audio',
+    'demucs.apply',
+    'demucs.separator',
+    'torch',
+    'torchaudio',
+    'numpy.core.multiarray',
+    'numpy.core._multiarray_umath',
+    'numpy.core.numeric',
+]
 
 a = Analysis(
     [str(base_path / 'src' / 'separator.py')],
     pathex=[str(base_path), str(base_path / 'src')],
-    binaries=[(ffmpeg_path, '.')],
-    datas=[(str(remote_dir), 'demucs/remote')],
-    hiddenimports=[
-        'typing',
-        'numpy.core.multiarray',
-        'numpy.core._multiarray_umath',
-        'scipy',
-        'scipy.io',
-        'scipy.io.wavfile',
-        'faster_whisper',
-        'faster_whisper.transcribe',
-        'faster_whisper.tokenizer',
-        'faster_whisper.utils',
-        'ctranslate2',
-        'onnxruntime',
-        'tokenizers',
-        'av',
-        'huggingface_hub',
-        'demucs.apply',
-        'demucs.audio',
-        'demucs.pretrained',
-        'demucs.hdemucs',
-        'demucs.htdemucs',
-        'demucs.solver',
-        'demucs.utils',
-        'demucs.states',
-        'demucs.repo',
-        'demucs.distrib',
-        'torch',
-        'torchaudio',
-        'tqdm',
-        'PIL',
-        'PIL.Image',
-    ],
+    binaries=[],
+    datas=[(str(remote_dir), 'demucs/remote'), (str(base_path / 'src' / 'LiberationSans-Bold.ttf'), 'src')],
+    hiddenimports=hiddenimports_common,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -76,11 +63,10 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
 )

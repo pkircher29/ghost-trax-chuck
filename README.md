@@ -32,8 +32,10 @@ Run the installer, then open the app, pick an audio file, and click **Make Karao
 
 ```bash
 ./build.sh
-./dist/GhostTrax input.mp3
+./dist/GhostTrax input.mp3      # create karaoke zip
 ```
+
+For playback, see the companion project [GhostTrax Player](https://github.com/pkircher29/ghost-trax-player).
 
 ## Output files
 

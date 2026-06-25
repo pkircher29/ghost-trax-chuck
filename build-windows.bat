@@ -8,19 +8,22 @@ cd /d "%~dp0"
 if not exist ffmpeg.exe (
     echo Downloading ffmpeg for Windows...
     powershell -Command "Invoke-WebRequest -Uri https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip"
-    powershell -Command "Expand-Archive -Path ffmpeg.zip -DestinationPath ."
+    powershell -Command "Expand-Archive -Path ffmpeg.zip -DestinationPath . -Force"
     for /d %%D in (ffmpeg-*) do copy "%%D\bin\ffmpeg.exe" ffmpeg.exe
+    del /q ffmpeg.zip
+    for /d %%D in (ffmpeg-*) do rmdir /s /q "%%D"
 )
 
-python -m pip install pyinstaller demucs scipy faster-whisper
+pyinstaller --clean --noconfirm GhostTrax-windows.spec
 
-python -m PyInstaller GhostTrax-windows.spec --clean
-
-if exist "%ProgramFiles(x86)%\NSIS\makensis.exe" (
-    "%ProgramFiles(x86)%\NSIS\makensis.exe" installer.nsi
+if exist "C:\Program Files (x86)\NSIS\makensis.exe" (
+    "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+) else if exist "C:\Program Files\NSIS\makensis.exe" (
+    "C:\Program Files\NSIS\makensis.exe" installer.nsi
 ) else (
-    echo NSIS not found. Skipping installer.
+    echo NSIS not found; installer not built.
 )
 
 echo Build complete.
-dir dist
+dir dist\GhostTrax.exe
+if exist GhostTrax_Setup.exe dir GhostTrax_Setup.exe

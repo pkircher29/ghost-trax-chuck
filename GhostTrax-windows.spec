@@ -7,49 +7,36 @@ from pathlib import Path
 import demucs
 remote_dir = Path(demucs.__file__).parent / "remote"
 
-block_cipher = None
-base_path = Path(SPECPATH)
+base_path = Path(SPECPATH).resolve()
 
-# ffmpeg.exe must be placed next to this spec before building
-ffmpeg_path = str(base_path / 'ffmpeg.exe')
+block_cipher = None
+
+hiddenimports_common = [
+    'typing',
+    'scipy',
+    'scipy.io',
+    'scipy.io.wavfile',
+    'faster_whisper',
+    'demucs',
+    'demucs.pretrained',
+    'demucs.model',
+    'demucs.utils',
+    'demucs.audio',
+    'demucs.apply',
+    'demucs.separator',
+    'torch',
+    'torchaudio',
+    'numpy.core.multiarray',
+    'numpy.core._multiarray_umath',
+    'numpy.core.numeric',
+]
 
 a = Analysis(
     [str(base_path / 'src' / 'separator.py')],
     pathex=[str(base_path), str(base_path / 'src')],
-    binaries=[(ffmpeg_path, '.')],
+    binaries=[],
     datas=[(str(remote_dir), 'demucs/remote')],
-    hiddenimports=[
-        'typing',
-        'numpy.core.multiarray',
-        'numpy.core._multiarray_umath',
-        'scipy',
-        'scipy.io',
-        'scipy.io.wavfile',
-        'faster_whisper',
-        'faster_whisper.transcribe',
-        'faster_whisper.tokenizer',
-        'faster_whisper.utils',
-        'ctranslate2',
-        'onnxruntime',
-        'tokenizers',
-        'av',
-        'huggingface_hub',
-        'demucs.apply',
-        'demucs.audio',
-        'demucs.pretrained',
-        'demucs.hdemucs',
-        'demucs.htdemucs',
-        'demucs.solver',
-        'demucs.utils',
-        'demucs.states',
-        'demucs.repo',
-        'demucs.distrib',
-        'torch',
-        'torchaudio',
-        'tqdm',
-        'PIL',
-        'PIL.Image',
-    ],
+    hiddenimports=hiddenimports_common,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -82,5 +69,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
 )
