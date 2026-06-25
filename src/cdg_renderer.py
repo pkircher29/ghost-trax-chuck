@@ -1,4 +1,4 @@
-"""CDG (CD+Graphics) renderer. - Updated
+"""CDG (CD+Graphics) renderer.
 
 Generates a raw CDG subcode packet stream for word-by-word karaoke lyrics.
 CDG packets are 24 bytes each and play at exactly 300 packets per second.
@@ -9,6 +9,7 @@ This implementation follows the layout used by OpenKJ / CD+G redbook:
   * Tile block instruction = 6 (normal), 38 (XOR)
   * Color-table load instructions = 30 (low) and 31 (high)
   * Memory preset = 1, border preset = 2
+  * Scroll preset = 20, scroll copy = 24
   * Tiles are 6 pixels wide by 12 pixels tall
   * Screen is 50 columns x 18 rows = 300 x 216
 """
@@ -17,8 +18,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 from pathlib import Path
 
-from font_5x7 import get_char_bits
-from PIL import Image, ImageFont, ImageDraw
+from src.font_5x7 import get_char_bits
 
 # CDG constants
 TILE_WIDTH = 6
@@ -30,8 +30,6 @@ SCREEN_H = TILES_V * TILE_HEIGHT  # 216
 PACKETS_PER_SECOND = 300
 
 # Default CDG colors are 4-bit RGB per channel (0-15). Indices 0-15.
-# Each tile supports only 2 colors (color0/color1). We keep the palette
-# filled so standard players decode correctly.
 PALETTE = [
     (0, 0, 0),         # 0 black  (background / color0 default)
     (15, 15, 15),      # 1 white  (text / color1 default)
@@ -60,15 +58,7 @@ class Word:
 
 
 def _color_to_cdg_bytes(rgb: Tuple[int, int, int]) -> Tuple[int, int]:
-    """Pack 4-bit RGB into two 6-bit CDG color bytes (OpenKJ format).
-
-    OpenKJ reconstructs the 12-bit word as:
-      red   = lowbyte  bits 5..2  (8,4,2,1)
-      green = lowbyte  bits 1..0 + highbyte bits 5..4
-      blue  = highbyte bits 3..0
-    We store the 12-bit word as (r << 8) | (g << 4) | b and then split it
-    the same way: the high 6 bits go to byte0, the low 6 bits to byte1.
-    """
+    """Pack 4-bit RGB into two 6-bit CDG color bytes (OpenKJ format)."""
     r = rgb[0] & 0x0F
     g = rgb[1] & 0x0F
     b = rgb[2] & 0x0F
@@ -77,15 +67,7 @@ def _color_to_cdg_bytes(rgb: Tuple[int, int, int]) -> Tuple[int, int]:
 
 
 def make_packet(command: int, instruction: int, data: bytes) -> bytes:
-    """Build a 24-byte CDG packet matching OpenKJ's decoder.
-
-    Layout:
-      byte 0  : command (must be 0x09)
-      byte 1  : instruction (low 6 bits)
-      bytes 2-3: parity (ignored here)
-      bytes 4-19: 16 data bytes
-      bytes 20-23: parity (ignored here)
-    """
+    """Build a 24-byte CDG packet matching OpenKJ's decoder."""
     assert len(data) == 16
     packet = bytearray(24)
     packet[0] = command & 0x3F
@@ -142,12 +124,7 @@ def set_tile(
     color0: int = 0,
     color1: int = 1,
 ) -> bytes:
-    """Update a 6x12 tile (CDG instruction 6).
-
-    pixels is 72 color indices arranged as 12 rows x 6 columns.  Each byte
-    holds one row: bit 5 = col 0, bit 4 = col 1, ..., bit 0 = col 5.
-    Values equal to color1 draw with color1, otherwise color0.
-    """
+    """Update a 6x12 tile (CDG instruction 6)."""
     assert len(pixels) == TILE_WIDTH * TILE_HEIGHT
     data = bytearray(16)
     data[0] = color0 & 0x0F
@@ -164,92 +141,51 @@ def set_tile(
     return make_packet(9, 6, bytes(data))
 
 
-def sanitize_tile_colors(tile: List[int], color0: int = 0) -> List[int]:
-    """Ensure the tile contains at most 2 colors by mapping minority foreground colors to the majority foreground color."""
-    foreground_colors = [c for c in tile if c != color0]
-    if not foreground_colors:
-        return tile
-    unique_fg = set(foreground_colors)
-    if len(unique_fg) <= 1:
-        return tile
-    counts = {}
-    for c in foreground_colors:
-        counts[c] = counts.get(c, 0) + 1
-    majority_fg = max(counts, key=counts.get)
-    return [c if c == color0 or c == majority_fg else majority_fg for c in tile]
+def scroll_copy_packet(h_cmd: int, v_cmd: int, h_offset: int = 0, v_offset: int = 0, color: int = 0) -> bytes:
+    """Emit a CDG scroll-copy command (instruction 24)."""
+    assert h_cmd in (0, 1, 2)
+    assert v_cmd in (0, 1, 2)
+    data = bytearray(16)
+    data[0] = color & 0x0F
+    hscroll = (h_cmd << 4) | (h_offset & 0x07)
+    vscroll = (v_cmd << 4) | (v_offset & 0x0F)
+    data[1] = hscroll & 0x3F
+    data[2] = vscroll & 0x3F
+    return make_packet(9, 24, bytes(data))
 
 
-class TrueTypeFontCache:
-    def __init__(self, size: int = 18, height: int = 24):
-        import sys
-        # Look for local bundled font first
-        local_paths = [
-            Path(__file__).parent / "LiberationSans-Bold.ttf",
-            Path(getattr(sys, "_MEIPASS", "")) / "LiberationSans-Bold.ttf",
-            Path(getattr(sys, "_MEIPASS", "")) / "src" / "LiberationSans-Bold.ttf",
-        ]
-        font_path = None
-        for p in local_paths:
-            if p.exists():
-                font_path = str(p)
-                break
-        if font_path is None:
-            font_paths = [
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            ]
-            for p in font_paths:
-                if Path(p).exists():
-                    font_path = p
-                    break
-        if font_path is None:
-            self.font = ImageFont.load_default()
-        else:
-            self.font = ImageFont.truetype(font_path, size)
-        self.height = height
-        self.char_cache = {}
-        for code in range(32, 127):
-            ch = chr(code)
-            self._render_char(ch)
+class BitmapFontCache:
+    """Built-in 5x7 bitmap font scaled to CDG tile resolution."""
 
-    def _render_char(self, ch: str):
-        if hasattr(self.font, "getlength"):
-            w = int(self.font.getlength(ch))
-        else:
-            # Fallback for default font
-            w, _ = self.font.getsize(ch) if hasattr(self.font, "getsize") else (6, 12)
-        if w <= 0:
-            w = 5
-        img = Image.new("1", (w, self.height), 0)
-        draw = ImageDraw.Draw(img)
-        # Shift text slightly down to vertically align
-        draw.text((0, 1), ch, font=self.font, fill=1)
-        cols = []
-        for x in range(w):
-            col = []
-            for y in range(self.height):
-                col.append(img.getpixel((x, y)))
-            cols.append(col)
-        self.char_cache[ch] = {
-            "width": w,
-            "height": self.height,
-            "pixels": cols
-        }
+    def __init__(self):
+        self.char_height = 7
 
     def get_char_info(self, ch: str) -> dict:
-        if ch not in self.char_cache:
-            self._render_char(ch)
-        return self.char_cache.get(ch, self.char_cache.get(" "))
+        bits = get_char_bits(ch)
+        # columns as rows of 0/1 pixels, top to bottom
+        pixels = []
+        for col in bits:
+            col_pixels = []
+            for row in range(7):
+                bit = 1 << (6 - row)
+                col_pixels.append(1 if col & bit else 0)
+            pixels.append(col_pixels)
+        return {
+            "width": len(bits),
+            "height": self.char_height,
+            "pixels": pixels,
+        }
 
 
-FONT_CACHE = TrueTypeFontCache()
+FONT_CACHE = BitmapFontCache()
 
 
-def get_text_width(text: str) -> int:
+def get_text_width(text: str, scale: int = 1) -> int:
     width = 0
-    for ch in text:
-        width += FONT_CACHE.get_char_info(ch)["width"] + 1
+    for i, ch in enumerate(text):
+        width += FONT_CACHE.get_char_info(ch)["width"] * scale
+        if i < len(text) - 1:
+            width += scale  # inter-char spacing
     return width
 
 
@@ -266,28 +202,31 @@ class CdgCanvas:
         if 0 <= x < SCREEN_W and 0 <= y < SCREEN_H:
             self.pixels[y * SCREEN_W + x] = color
 
-    def draw_char(self, ch: str, x: int, y: int, color: int, scale: int = 1, color_active: int | None = None, sweep_x: float | None = None):
+    def draw_char(self, ch: str, x: int, y: int, color: int, scale: int = 1,
+                  color_active: int | None = None, sweep_x: float | None = None):
         info = FONT_CACHE.get_char_info(ch)
         w = info["width"]
-        h = info["height"]
         cols = info["pixels"]
         for col_idx in range(w):
             col_pixels = cols[col_idx]
-            for row_idx in range(h):
+            for row_idx in range(7):
                 if col_pixels[row_idx]:
-                    px = x + col_idx
-                    py = y + row_idx
-                    if sweep_x is not None and color_active is not None:
-                        c = color_active if px < sweep_x else color
-                    else:
-                        c = color
-                    self.set_pixel(px, py, c)
+                    px = x + col_idx * scale
+                    py = y + row_idx * scale
+                    for dy in range(scale):
+                        for dx in range(scale):
+                            if sweep_x is not None and color_active is not None:
+                                c = color_active if (px + dx) < sweep_x else color
+                            else:
+                                c = color
+                            self.set_pixel(px + dx, py + dy, c)
 
-    def draw_text(self, text: str, x: int, y: int, color: int, scale: int = 1, color_active: int | None = None, sweep_x: float | None = None):
+    def draw_text(self, text: str, x: int, y: int, color: int, scale: int = 1,
+                  color_active: int | None = None, sweep_x: float | None = None) -> int:
         cx = x
         for ch in text:
             self.draw_char(ch, cx, y, color, scale, color_active, sweep_x)
-            cx += FONT_CACHE.get_char_info(ch)["width"] + 1
+            cx += FONT_CACHE.get_char_info(ch)["width"] * scale + scale
         return cx
 
     def get_tile(self, col: int, row: int) -> List[int]:
@@ -298,21 +237,34 @@ class CdgCanvas:
                 x = col * TILE_WIDTH + tx
                 y = row * TILE_HEIGHT + ty
                 tile_pixels.append(self.pixels[y * SCREEN_W + x])
-        return sanitize_tile_colors(tile_pixels)
+        return _sanitize_tile_colors(tile_pixels)
+
+
+def _sanitize_tile_colors(tile: List[int], color0: int = 0) -> List[int]:
+    """Ensure the tile contains at most 2 colors by mapping minority foreground colors to the majority foreground color."""
+    foreground_colors = [c for c in tile if c != color0]
+    if not foreground_colors:
+        return tile
+    unique_fg = set(foreground_colors)
+    if len(unique_fg) <= 1:
+        return tile
+    counts: dict[int, int] = {}
+    for c in foreground_colors:
+        counts[c] = counts.get(c, 0) + 1
+    majority_fg = max(counts.items(), key=lambda kv: kv[1])[0]
+    return [c if c == color0 or c == majority_fg else majority_fg for c in tile]
+
+
+def _tile_foreground_color(tile: List[int], color0: int) -> int:
+    for idx in tile:
+        if idx != color0:
+            return idx
+    return 1  # default foreground color
 
 
 def wrap_words_into_lines(words: List[Word], max_pixels: int, scale: int = 1) -> List[Tuple[int, List[Word]]]:
-    """Wrap words into screen lines based on pixel width and natural phrasing.
-
-    Returns a list of (first_word_index, line_words) tuples so callers can
-    map the active word back to a line index even when words repeat.
-
-    Heuristics matching commercial CDGs (e.g., OpenKJ-rendered files):
-      * break after punctuation (.,!?;:)
-      * break after a long silence gap between words (>> 0.35 s)
-      * otherwise fill to the pixel budget
-    """
-    space_width = get_text_width(" ")
+    """Wrap words into screen lines based on pixel width and natural phrasing."""
+    space_width = scale
     lines: List[Tuple[int, List[Word]]] = []
     current: List[Word] = []
     current_first = 0
@@ -325,7 +277,7 @@ def wrap_words_into_lines(words: List[Word], max_pixels: int, scale: int = 1) ->
         return gap > 0.35
 
     for idx, word in enumerate(words):
-        word_width = get_text_width(word.text)
+        word_width = get_text_width(word.text, scale)
 
         fits = not current or current_width + space_width + word_width <= max_pixels
         force_break = False
@@ -355,119 +307,6 @@ def wrap_words_into_lines(words: List[Word], max_pixels: int, scale: int = 1) ->
     return lines
 
 
-def _render_screen_canvas(
-    words: List[Word],
-    t: float,
-    scale: int = 2,
-    color_upcoming: int = 1,
-    color_active: int = 2,
-    color_past: int = 2,
-    visible_lines: int = 5,
-) -> CdgCanvas:
-    """Render lyrics to a CdgCanvas with smooth progress coloring."""
-    canvas = CdgCanvas()
-    canvas.clear(0)
-
-    if not words:
-        return canvas
-
-    char_width = 6 * scale
-    space_width = 6 * scale
-    line_height = TILE_HEIGHT * scale
-
-    margin = 12
-    max_pixels = SCREEN_W - margin * 2
-    all_lines = wrap_words_into_lines(words, max_pixels, scale)
-
-    # Find the active word at time t
-    current_word_index = -1
-    for i, word in enumerate(words):
-        if word.start <= t < word.end:
-            current_word_index = i
-            break
-    if current_word_index == -1 and words and t >= words[-1].end:
-        current_word_index = len(words)
-
-    # Find the line that contains the current word by index.
-    active_line_idx = 0
-    found = False
-    for i, (first_idx, line) in enumerate(all_lines):
-        line_len = len(line)
-        if first_idx <= current_word_index < first_idx + line_len:
-            active_line_idx = i
-            found = True
-            break
-    if not found and words and current_word_index >= len(words):
-        # Past the end: keep the last line active.
-        active_line_idx = len(all_lines) - 1
-
-    # Show a window centered on the active line.
-    half = visible_lines // 2
-    start_line = max(0, active_line_idx - half)
-    if start_line + visible_lines > len(all_lines):
-        start_line = max(0, len(all_lines) - visible_lines)
-    display_lines = all_lines[start_line:start_line + visible_lines]
-
-    # Center vertically and align to tile rows.
-    total_height = len(display_lines) * line_height
-    raw_start_y = (SCREEN_H - total_height) // 2
-    start_y = max(TILE_HEIGHT, (raw_start_y // TILE_HEIGHT) * TILE_HEIGHT)
-    if start_y + total_height > SCREEN_H - TILE_HEIGHT:
-        start_y = ((raw_start_y + TILE_HEIGHT - 1) // TILE_HEIGHT) * TILE_HEIGHT
-        if start_y < TILE_HEIGHT:
-            start_y = TILE_HEIGHT
-
-    for offset, (first_idx, line_words) in enumerate(display_lines):
-        y = start_y + offset * line_height
-        _draw_line(canvas, line_words, first_idx, t, y, scale, color_upcoming, color_active, margin)
-
-    return canvas
-
-
-def encode_tiles(canvas: CdgCanvas, color0: int = 0, skip_empty: bool = True) -> List[bytes]:
-    """Emit tile packets for the canvas, skipping tiles that are all background."""
-    packets = []
-    for row in range(TILES_V):
-        for col in range(TILES_H):
-            tile = canvas.get_tile(col, row)
-            if skip_empty and all(p == color0 for p in tile):
-                continue
-            color1 = _tile_foreground_color(tile, color0)
-            packets.append(set_tile(col, row, tile, color0, color1))
-    return packets
-
-
-def encode_diff(
-    old_canvas: CdgCanvas | None,
-    new_canvas: CdgCanvas,
-    color0: int = 0,
-) -> List[bytes]:
-    """Emit tile packets only for tiles that changed."""
-    packets = []
-    for row in range(TILES_V):
-        for col in range(TILES_H):
-            new_tile = new_canvas.get_tile(col, row)
-            if old_canvas is None or old_canvas.get_tile(col, row) != new_tile:
-                color1 = _tile_foreground_color(new_tile, color0)
-                packets.append(set_tile(col, row, new_tile, color0, color1))
-    return packets
-
-
-def _tile_foreground_color(tile: List[int], color0: int) -> int:
-    """Return the first non-background color used in the tile.
-
-    CDG tiles support exactly two colors (color0 and color1). Our canvas may
-    use indices 1 and 2 for text, so each tile's actual foreground color must
-    be discovered and used as color1.
-    """
-    for idx in tile:
-        if idx != color0:
-            return idx
-    return 1  # default foreground color
-
-
-
-
 def _active_line_index(words: List[Word], word_index: int, all_lines: List[Tuple[int, List[Word]]]) -> int:
     """Return the line index containing word_index, or the nearest valid line."""
     if not words:
@@ -482,26 +321,42 @@ def _active_line_index(words: List[Word], word_index: int, all_lines: List[Tuple
     return len(all_lines) - 1
 
 
+def _find_current_word_index(words: List[Word], t: float, search_start: int = 0) -> int:
+    """Return the index of the word active at time t, or len(words) after end."""
+    if not words:
+        return -1
+    for i in range(search_start, len(words)):
+        w = words[i]
+        if w.start <= t < w.end:
+            return i
+    if t >= words[-1].end:
+        return len(words)
+    for i in range(search_start):
+        w = words[i]
+        if w.start <= t < w.end:
+            return i
+    return -1
+
+
 def _draw_line(
     canvas: CdgCanvas,
     line_words: List[Word],
     first_word_index: int,
     t: float,
     y: int,
-    scale: int = 2,
+    scale: int = 1,
     color_upcoming: int = 1,
     color_active: int = 2,
     margin: int = 12,
 ):
-    """Draw one lyric line onto the canvas at the given y position, with a smooth sweep at time t."""
-    space_width = get_text_width(" ")
-    full_width = sum(get_text_width(w.text) for w in line_words)
+    """Draw one lyric line onto the canvas with a smooth sweep at time t."""
+    space_width = scale
+    full_width = sum(get_text_width(w.text, scale) for w in line_words)
     full_width += max(0, len(line_words) - 1) * space_width
     x = max(margin, (SCREEN_W - full_width) // 2)
     for word_offset, word in enumerate(line_words):
-        w_width = get_text_width(word.text)
-        
-        # Calculate sweep coordinate for this word
+        w_width = get_text_width(word.text, scale)
+
         if t <= word.start:
             sweep_x = x
         elif t >= word.end:
@@ -509,7 +364,7 @@ def _draw_line(
         else:
             p = (t - word.start) / (word.end - word.start)
             sweep_x = x + p * w_width
-            
+
         x = canvas.draw_text(word.text, x, y, color_upcoming, scale, color_active=color_active, sweep_x=sweep_x)
         x += space_width
 
@@ -520,7 +375,7 @@ def _emit_line_tiles(
     line_words: List[Word],
     first_word_index: int,
     t: float,
-    scale: int = 2,
+    scale: int = 1,
     color0: int = 0,
 ) -> List[bytes]:
     """Emit tile packets for a single line at time t."""
@@ -528,8 +383,9 @@ def _emit_line_tiles(
     temp.clear(color0)
     _draw_line(temp, line_words, first_word_index, t, line_y, scale)
     packets = []
+    line_height = TILE_HEIGHT * scale
     start_row = line_y // TILE_HEIGHT
-    end_row = (line_y + 24 - 1) // TILE_HEIGHT
+    end_row = (line_y + line_height - 1) // TILE_HEIGHT
     for row in range(start_row, min(end_row + 1, TILES_V)):
         for col in range(TILES_H):
             tile = temp.get_tile(col, row)
@@ -540,8 +396,8 @@ def _emit_line_tiles(
     return packets
 
 
-def _apply_scroll_to_canvas(canvas: CdgCanvas, direction: str):
-    """Update a logical canvas the same way a CDG scroll-copy does."""
+def _apply_scroll(canvas: CdgCanvas, direction: str):
+    """Update a logical canvas the same way a CDG scroll-copy does by one tile row."""
     new_pixels = [0] * (SCREEN_W * SCREEN_H)
     if direction == "up":
         for y in range(SCREEN_H - TILE_HEIGHT):
@@ -560,17 +416,30 @@ def _apply_scroll_to_canvas(canvas: CdgCanvas, direction: str):
     canvas.pixels = new_pixels
 
 
-def scroll_copy_packet(h_cmd: int, v_cmd: int, h_offset: int = 0, v_offset: int = 0, color: int = 0) -> bytes:
-    """Emit a CDG scroll-copy command (instruction 24)."""
-    assert h_cmd in (0, 1, 2)
-    assert v_cmd in (0, 1, 2)
-    data = bytearray(16)
-    data[0] = color & 0x0F
-    hscroll = (h_cmd << 4) | (h_offset & 0x07)
-    vscroll = (v_cmd << 4) | (v_offset & 0x0F)
-    data[1] = hscroll & 0x3F
-    data[2] = vscroll & 0x3F
-    return make_packet(9, 24, bytes(data))
+def _encode_full_canvas(canvas: CdgCanvas, color0: int = 0) -> List[bytes]:
+    """Emit tile packets for every non-empty tile on the canvas."""
+    packets = []
+    for row in range(TILES_V):
+        for col in range(TILES_H):
+            tile = canvas.get_tile(col, row)
+            if all(p == color0 for p in tile):
+                continue
+            color1 = _tile_foreground_color(tile, color0)
+            packets.append(set_tile(col, row, tile, color0, color1))
+    return packets
+
+
+def _encode_diff(old_canvas: CdgCanvas | None, new_canvas: CdgCanvas, color0: int = 0) -> List[bytes]:
+    """Emit tile packets only for tiles that changed."""
+    packets = []
+    for row in range(TILES_V):
+        for col in range(TILES_H):
+            new_tile = new_canvas.get_tile(col, row)
+            if old_canvas is None or old_canvas.get_tile(col, row) != new_tile:
+                color1 = _tile_foreground_color(new_tile, color0)
+                packets.append(set_tile(col, row, new_tile, color0, color1))
+    return packets
+
 
 def build_cdg_from_words(
     words: List[Word],
@@ -580,15 +449,15 @@ def build_cdg_from_words(
     visible_lines: int = 4,
     scale: int = 2,
 ) -> Path:
-    """Build a complete .cdg file synchronized to music, using page-by-page rendering.
+    """Build a complete .cdg file synchronized to music, using line-by-line scrolling.
 
-    Uses smooth pixel-level lyric sweep (wipe). When the lyrics reach the end of the page,
-    the screen is cleared, and the next page of lyrics is drawn.
+    Instead of erasing the whole screen at page boundaries (which causes flashes),
+    the display scrolls up one line at a time and draws the incoming line at the
+    bottom. The built-in 5x7 bitmap font is scaled so lyrics are sharp on CDG.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    palette = palette or list(range(16))
     total_packets = max(int(duration_seconds * PACKETS_PER_SECOND), 1)
 
     margin = 12
@@ -596,7 +465,7 @@ def build_cdg_from_words(
     all_lines = wrap_words_into_lines(words, max_pixels, scale)
     line_height = TILE_HEIGHT * scale
 
-    # Fixed Y positions for visible lines, centered vertically.
+    # Center the visible window vertically and align to tile rows.
     total_vis_height = visible_lines * line_height
     raw_start_y = (SCREEN_H - total_vis_height) // 2
     start_y = max(TILE_HEIGHT, (raw_start_y // TILE_HEIGHT) * TILE_HEIGHT)
@@ -613,24 +482,22 @@ def build_cdg_from_words(
         f.write(border_preset(0))
 
         packets_emitted = 4
-        current_word_index = -1
-        # Start viewport at the beginning of the first page (line 0)
         viewport_first_line = 0
-
-        # Logical canvas matching the CDG framebuffer
+        current_word_index = -1
         canvas = CdgCanvas()
         canvas.clear(0)
 
-        # Draw initial visible lines (all upcoming color at t=0.0)
-        for offset, (first_idx, line_words) in enumerate(all_lines[viewport_first_line:viewport_first_line + visible_lines]):
-            if offset < len(line_y_positions):
-                y = line_y_positions[offset]
-                packets = _emit_line_tiles(canvas, y, line_words, first_idx, 0.0, scale)
-                f.write(b"".join(packets))
-                packets_emitted += len(packets)
-                _draw_line(canvas, line_words, first_idx, 0.0, y, scale)
+        # Draw the initial visible window.
+        for offset, (first_idx, line_words) in enumerate(all_lines[:visible_lines]):
+            if offset >= len(line_y_positions):
+                break
+            y = line_y_positions[offset]
+            packets = _emit_line_tiles(canvas, y, line_words, first_idx, 0.0, scale)
+            f.write(b"".join(packets))
+            packets_emitted += len(packets)
+            _draw_line(canvas, line_words, first_idx, 0.0, y, scale)
 
-        packets_per_render = 10
+        packets_per_render = 5  # ~60 ms updates for smooth color wipes
 
         for packet_idx in range(0, total_packets, packets_per_render):
             t = packet_idx / PACKETS_PER_SECOND
@@ -639,60 +506,56 @@ def build_cdg_from_words(
                 f.write(noop_packet())
                 packets_emitted += 1
 
-            # Chronological optimization: start search from current_word_index
-            new_word_index = -1
-            search_start = max(0, current_word_index)
-            for i in range(search_start, len(words)):
-                word = words[i]
-                if word.start <= t < word.end:
-                    new_word_index = i
-                    break
-            if new_word_index == -1:
-                if words and t >= words[-1].end:
-                    new_word_index = len(words)
-                else:
-                    for i in range(search_start):
-                        word = words[i]
-                        if word.start <= t < word.end:
-                            new_word_index = i
-                            break
-
+            new_word_index = _find_current_word_index(words, t, max(0, current_word_index))
             current_word_index = new_word_index
             active_line = _active_line_index(words, current_word_index, all_lines)
 
-            # Page-by-page pagination logic
-            current_page = active_line // visible_lines
-            expected_first_line = current_page * visible_lines
+            # Scroll the window forward until the active line is visible.
+            while active_line >= viewport_first_line + visible_lines and viewport_first_line + visible_lines < len(all_lines):
+                viewport_first_line += 1
+                # Scroll the physical screen up by one logical line.
+                for _ in range(scale):
+                    f.write(scroll_copy_packet(0, 2, 0, 0, 0))
+                    packets_emitted += 1
+                    _apply_scroll(canvas, "up")
+                # Draw the new line at the bottom of the window.
+                new_line_idx = viewport_first_line + visible_lines - 1
+                if new_line_idx < len(all_lines):
+                    first_idx, line_words = all_lines[new_line_idx]
+                    y = line_y_positions[-1]
+                    packets = _emit_line_tiles(canvas, y, line_words, first_idx, t, scale)
+                    f.write(b"".join(packets))
+                    packets_emitted += len(packets)
+                    _draw_line(canvas, line_words, first_idx, t, y, scale)
 
-            if expected_first_line != viewport_first_line:
-                # Page changed! Clear screen and draw new page.
-                viewport_first_line = expected_first_line
+            # Scroll backward if the user seeks back (rare during normal play).
+            while active_line < viewport_first_line and viewport_first_line > 0:
+                viewport_first_line -= 1
+                for _ in range(scale):
+                    f.write(scroll_copy_packet(0, 1, 0, 0, 0))
+                    packets_emitted += 1
+                    _apply_scroll(canvas, "down")
+                new_line_idx = viewport_first_line
+                if new_line_idx < len(all_lines):
+                    first_idx, line_words = all_lines[new_line_idx]
+                    y = line_y_positions[0]
+                    packets = _emit_line_tiles(canvas, y, line_words, first_idx, t, scale)
+                    f.write(b"".join(packets))
+                    packets_emitted += len(packets)
+                    _draw_line(canvas, line_words, first_idx, t, y, scale)
 
-                # 1. Clear physical screen (memory preset)
-                f.write(memory_preset(0, repeat=0))
-                packets_emitted += 1
-
-                # 2. Clear logical canvas
-                canvas.clear(0)
-
-                # 3. Draw and emit the new page lines (all in upcoming color at time t)
-                page_lines = all_lines[viewport_first_line : viewport_first_line + visible_lines]
-                for offset, (first_idx, line_words) in enumerate(page_lines):
-                    if offset < len(line_y_positions):
-                        y = line_y_positions[offset]
-                        packets = _emit_line_tiles(canvas, y, line_words, first_idx, t, scale)
-                        f.write(b"".join(packets))
-                        packets_emitted += len(packets)
-                        _draw_line(canvas, line_words, first_idx, t, y, scale)
-
-            # Update colors on the active line (and any previous visible lines, but they are already blue)
+            # Re-render the visible window at time t to update word sweeps.
             new_canvas = CdgCanvas()
             new_canvas.clear(0)
-            for offset, (first_idx, line_words) in enumerate(all_lines[viewport_first_line:viewport_first_line + visible_lines]):
-                if offset < len(line_y_positions):
-                    y = line_y_positions[offset]
-                    _draw_line(new_canvas, line_words, first_idx, t, y, scale)
-            diff = encode_diff(canvas, new_canvas)
+            for offset, (first_idx, line_words) in enumerate(
+                all_lines[viewport_first_line:viewport_first_line + visible_lines]
+            ):
+                if offset >= len(line_y_positions):
+                    break
+                y = line_y_positions[offset]
+                _draw_line(new_canvas, line_words, first_idx, t, y, scale)
+
+            diff = _encode_diff(canvas, new_canvas)
             f.write(b"".join(diff))
             packets_emitted += len(diff)
             canvas = new_canvas
