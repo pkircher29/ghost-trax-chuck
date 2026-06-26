@@ -391,14 +391,9 @@ def _render_screen_canvas(
     max_pixels = SCREEN_W - margin * 2
     all_lines = wrap_words_into_lines(words, max_pixels, scale)
 
-    # Find the active word at time t
-    current_word_index = -1
-    for i, word in enumerate(words):
-        if word.start <= t < word.end:
-            current_word_index = i
-            break
-    if current_word_index == -1 and words and t >= words[-1].end:
-        current_word_index = len(words)
+    # Find the word/page that should be displayed at time t. During gaps, keep
+    # the previous lyric page instead of jumping back to the first screen.
+    current_word_index = _display_word_index_at_time(words, t)
 
     # Find the line that contains the current word by index.
     active_line_idx = 0
@@ -478,6 +473,35 @@ def _tile_foreground_color(tile: List[int], color0: int) -> int:
     return 1  # default foreground color
 
 
+
+
+def _display_word_index_at_time(words: List[Word], t: float, previous_index: int = -1) -> int:
+    """Return the word index that should control the visible lyric page at time t.
+
+    During instrumental/silence gaps between words, there is no actively swept
+    word. The old renderer returned -1 in those gaps, which mapped back to line
+    0 and made later pages flash the first lyric screen. Instead, hold the most
+    recent word/page until the next word starts.
+    """
+    if not words:
+        return -1
+    if t < words[0].start:
+        return 0
+
+    last_started = -1
+    for i, word in enumerate(words):
+        if word.start <= t:
+            last_started = i
+            if t < word.end:
+                return i
+        else:
+            break
+
+    if last_started >= 0:
+        return last_started
+    if t >= words[-1].end:
+        return len(words)
+    return max(0, previous_index)
 
 
 def _active_line_index(words: List[Word], word_index: int, all_lines: List[Tuple[int, List[Word]]]) -> int:
@@ -651,25 +675,7 @@ def build_cdg_from_words(
                 f.write(noop_packet())
                 packets_emitted += 1
 
-            # Chronological optimization: start search from current_word_index
-            new_word_index = -1
-            search_start = max(0, current_word_index)
-            for i in range(search_start, len(words)):
-                word = words[i]
-                if word.start <= t < word.end:
-                    new_word_index = i
-                    break
-            if new_word_index == -1:
-                if words and t >= words[-1].end:
-                    new_word_index = len(words)
-                else:
-                    for i in range(search_start):
-                        word = words[i]
-                        if word.start <= t < word.end:
-                            new_word_index = i
-                            break
-
-            current_word_index = new_word_index
+            current_word_index = _display_word_index_at_time(words, t, current_word_index)
             active_line = _active_line_index(words, current_word_index, all_lines)
 
             # Page-by-page pagination logic
