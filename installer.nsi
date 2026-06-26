@@ -6,6 +6,8 @@ InstallDir "$LOCALAPPDATA\GhostTrax"
 RequestExecutionLevel user
 
 !define MUI_ABORTWARNING
+!define MUI_ICON "src\assets\icons\ghosttrax.ico"
+!define MUI_UNICON "src\assets\icons\ghosttrax.ico"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -23,7 +25,7 @@ Section "Install"
     File /r "dist\GhostTrax.exe"
     File "ffmpeg.exe"
 
-    CreateShortcut "$DESKTOP\GhostTrax.lnk" "$INSTDIR\GhostTrax.exe"
+    CreateShortcut "$DESKTOP\GhostTrax.lnk" "$INSTDIR\GhostTrax.exe" "" "$INSTDIR\GhostTrax.exe" 0
 
     WriteUninstaller "$INSTDIR\Uninstall.exe"
 

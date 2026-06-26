@@ -49,6 +49,8 @@ a = Analysis(
     noarchive=False,
 )
 
+icon_file = base_path / 'src' / 'assets' / 'icons' / 'ghosttrax.ico'
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
@@ -71,4 +73,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(icon_file),
 )
