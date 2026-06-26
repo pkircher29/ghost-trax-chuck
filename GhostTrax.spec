@@ -8,6 +8,8 @@ import demucs
 remote_dir = Path(demucs.__file__).parent / "remote"
 
 base_path = Path(SPECPATH).resolve()
+font_file = base_path / "src" / "assets" / "DejaVuSans-Bold.ttf"
+font_license = base_path / "src" / "assets" / "DejaVuSans-LICENSE.txt"
 
 block_cipher = None
 
@@ -35,7 +37,7 @@ a = Analysis(
     [str(base_path / 'src' / 'separator.py')],
     pathex=[str(base_path), str(base_path / 'src')],
     binaries=[],
-    datas=[(str(remote_dir), 'demucs/remote')],
+    datas=[(str(remote_dir), 'demucs/remote'), (str(font_file), 'src/assets'), (str(font_license), 'src/assets')],
     hiddenimports=hiddenimports_common,
     hookspath=[],
     hooksconfig={},

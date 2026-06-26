@@ -17,8 +17,6 @@ from dataclasses import dataclass
 from typing import List, Tuple
 from pathlib import Path
 
-from font_5x7 import get_char_bits
-from font_8x16 import get_char_bits as get_char_bits_8x16
 from PIL import Image, ImageFont, ImageDraw
 
 # CDG constants
@@ -29,10 +27,9 @@ TILES_V = 18
 SCREEN_W = TILES_H * TILE_WIDTH   # 300
 SCREEN_H = TILES_V * TILE_HEIGHT  # 216
 PACKETS_PER_SECOND = 300
-
-FONT_WIDTH = 8
-FONT_HEIGHT = 16
-FONT_SCALE = 1
+# Keep lyrics inside the CDG title-safe area. CDG frames are 300x216,
+# but many players/TVs crop near the edges.
+SAFE_MARGIN_X = 18
 
 # Default CDG colors are 4-bit RGB per channel (0-15). Indices 0-15.
 # Each tile supports only 2 colors (color0/color1). We keep the palette
@@ -184,31 +181,72 @@ def sanitize_tile_colors(tile: List[int], color0: int = 0) -> List[int]:
     return [c if c == color0 or c == majority_fg else majority_fg for c in tile]
 
 
-class BitmapFontCache8x16:
-    def __init__(self, scale: int = 1):
-        self.scale = scale
+class TrueTypeFontCache:
+    def __init__(self, size: int = 18, height: int = 24):
+        import sys
+        # Use the bundled font first so Linux/Windows builds render identically.
+        # In source runs it lives under src/assets; in PyInstaller one-file
+        # builds it is extracted under sys._MEIPASS/src/assets.
+        meipass = Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "_MEIPASS", None) else None
+        local_paths = [
+            Path(__file__).parent / "assets" / "DejaVuSans-Bold.ttf",
+        ]
+        if meipass is not None:
+            local_paths.extend([
+                meipass / "src" / "assets" / "DejaVuSans-Bold.ttf",
+                meipass / "assets" / "DejaVuSans-Bold.ttf",
+                meipass / "DejaVuSans-Bold.ttf",
+            ])
+        font_path = None
+        for p in local_paths:
+            if p.exists():
+                font_path = str(p)
+                break
+        if font_path is None:
+            font_paths = [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            ]
+            for p in font_paths:
+                if Path(p).exists():
+                    font_path = p
+                    break
+        self.font_path = font_path
+        if font_path is None:
+            self.font = ImageFont.load_default()
+        else:
+            self.font = ImageFont.truetype(font_path, size)
+        self.height = height
         self.char_cache = {}
         for code in range(32, 127):
             ch = chr(code)
             self._render_char(ch)
 
     def _render_char(self, ch: str):
-        cols = get_char_bits_8x16(ch)
-        w = FONT_WIDTH
-        h = FONT_HEIGHT
-        # cols is list of 8 bytes, each byte is one column bit 7 top..0 bottom
-        pixels = []
-        for y in range(h):
-            row = []
-            for x in range(w):
-                byte = cols[x]
-                bit = 1 << (7 - (y % 8))
-                row.append(1 if (byte & bit) else 0)
-            pixels.append(row)
+        if hasattr(self.font, "getlength"):
+            w = int(self.font.getlength(ch))
+        else:
+            # Fallback for default font
+            w, _ = self.font.getsize(ch) if hasattr(self.font, "getsize") else (6, 12)
+        if w <= 0:
+            w = 5
+        img = Image.new("1", (w, self.height), 0)
+        draw = ImageDraw.Draw(img)
+        # Shift text slightly down to vertically align
+        draw.text((0, 1), ch, font=self.font, fill=1)
+        cols = []
+        for x in range(w):
+            col = []
+            for y in range(self.height):
+                col.append(img.getpixel((x, y)))
+            cols.append(col)
         self.char_cache[ch] = {
             "width": w,
-            "height": h,
-            "pixels": pixels,
+            "height": self.height,
+            "pixels": cols
         }
 
     def get_char_info(self, ch: str) -> dict:
@@ -217,7 +255,7 @@ class BitmapFontCache8x16:
         return self.char_cache.get(ch, self.char_cache.get(" "))
 
 
-FONT_CACHE = BitmapFontCache8x16(scale=FONT_SCALE)
+FONT_CACHE = TrueTypeFontCache()
 
 
 def get_text_width(text: str) -> int:
@@ -244,10 +282,11 @@ class CdgCanvas:
         info = FONT_CACHE.get_char_info(ch)
         w = info["width"]
         h = info["height"]
-        rows = info["pixels"]
-        for row_idx in range(h):
-            for col_idx in range(w):
-                if rows[row_idx][col_idx]:
+        cols = info["pixels"]
+        for col_idx in range(w):
+            col_pixels = cols[col_idx]
+            for row_idx in range(h):
+                if col_pixels[row_idx]:
                     px = x + col_idx
                     py = y + row_idx
                     if sweep_x is not None and color_active is not None:
@@ -348,7 +387,7 @@ def _render_screen_canvas(
     space_width = 6 * scale
     line_height = TILE_HEIGHT * scale
 
-    margin = 12
+    margin = SAFE_MARGIN_X
     max_pixels = SCREEN_W - margin * 2
     all_lines = wrap_words_into_lines(words, max_pixels, scale)
 
@@ -464,7 +503,7 @@ def _draw_line(
     scale: int = 2,
     color_upcoming: int = 1,
     color_active: int = 2,
-    margin: int = 12,
+    margin: int = SAFE_MARGIN_X,
 ):
     """Draw one lyric line onto the canvas at the given y position, with a smooth sweep at time t."""
     space_width = get_text_width(" ")
@@ -564,7 +603,7 @@ def build_cdg_from_words(
     palette = palette or list(range(16))
     total_packets = max(int(duration_seconds * PACKETS_PER_SECOND), 1)
 
-    margin = 12
+    margin = SAFE_MARGIN_X
     max_pixels = SCREEN_W - margin * 2
     all_lines = wrap_words_into_lines(words, max_pixels, scale)
     line_height = TILE_HEIGHT * scale
