@@ -18,6 +18,7 @@ from typing import List, Tuple
 from pathlib import Path
 
 from font_5x7 import get_char_bits
+from font_8x16 import get_char_bits as get_char_bits_8x16
 from PIL import Image, ImageFont, ImageDraw
 
 # CDG constants
@@ -28,6 +29,10 @@ TILES_V = 18
 SCREEN_W = TILES_H * TILE_WIDTH   # 300
 SCREEN_H = TILES_V * TILE_HEIGHT  # 216
 PACKETS_PER_SECOND = 300
+
+FONT_WIDTH = 8
+FONT_HEIGHT = 16
+FONT_SCALE = 1
 
 # Default CDG colors are 4-bit RGB per channel (0-15). Indices 0-15.
 # Each tile supports only 2 colors (color0/color1). We keep the palette
@@ -179,62 +184,31 @@ def sanitize_tile_colors(tile: List[int], color0: int = 0) -> List[int]:
     return [c if c == color0 or c == majority_fg else majority_fg for c in tile]
 
 
-class TrueTypeFontCache:
-    def __init__(self, size: int = 18, height: int = 24):
-        import sys
-        # Look for local bundled font first
-        local_paths = [
-            Path(__file__).parent / "LiberationSans-Bold.ttf",
-            Path(getattr(sys, "_MEIPASS", "")) / "LiberationSans-Bold.ttf",
-            Path(getattr(sys, "_MEIPASS", "")) / "src" / "LiberationSans-Bold.ttf",
-        ]
-        font_path = None
-        for p in local_paths:
-            if p.exists():
-                font_path = str(p)
-                break
-        if font_path is None:
-            font_paths = [
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            ]
-            for p in font_paths:
-                if Path(p).exists():
-                    font_path = p
-                    break
-        if font_path is None:
-            self.font = ImageFont.load_default()
-        else:
-            self.font = ImageFont.truetype(font_path, size)
-        self.height = height
+class BitmapFontCache8x16:
+    def __init__(self, scale: int = 1):
+        self.scale = scale
         self.char_cache = {}
         for code in range(32, 127):
             ch = chr(code)
             self._render_char(ch)
 
     def _render_char(self, ch: str):
-        if hasattr(self.font, "getlength"):
-            w = int(self.font.getlength(ch))
-        else:
-            # Fallback for default font
-            w, _ = self.font.getsize(ch) if hasattr(self.font, "getsize") else (6, 12)
-        if w <= 0:
-            w = 5
-        img = Image.new("1", (w, self.height), 0)
-        draw = ImageDraw.Draw(img)
-        # Shift text slightly down to vertically align
-        draw.text((0, 1), ch, font=self.font, fill=1)
-        cols = []
-        for x in range(w):
-            col = []
-            for y in range(self.height):
-                col.append(img.getpixel((x, y)))
-            cols.append(col)
+        cols = get_char_bits_8x16(ch)
+        w = FONT_WIDTH
+        h = FONT_HEIGHT
+        # cols is list of 8 bytes, each byte is one column bit 7 top..0 bottom
+        pixels = []
+        for y in range(h):
+            row = []
+            for x in range(w):
+                byte = cols[x]
+                bit = 1 << (7 - (y % 8))
+                row.append(1 if (byte & bit) else 0)
+            pixels.append(row)
         self.char_cache[ch] = {
             "width": w,
-            "height": self.height,
-            "pixels": cols
+            "height": h,
+            "pixels": pixels,
         }
 
     def get_char_info(self, ch: str) -> dict:
@@ -243,7 +217,7 @@ class TrueTypeFontCache:
         return self.char_cache.get(ch, self.char_cache.get(" "))
 
 
-FONT_CACHE = TrueTypeFontCache()
+FONT_CACHE = BitmapFontCache8x16(scale=FONT_SCALE)
 
 
 def get_text_width(text: str) -> int:
@@ -270,11 +244,10 @@ class CdgCanvas:
         info = FONT_CACHE.get_char_info(ch)
         w = info["width"]
         h = info["height"]
-        cols = info["pixels"]
-        for col_idx in range(w):
-            col_pixels = cols[col_idx]
-            for row_idx in range(h):
-                if col_pixels[row_idx]:
+        rows = info["pixels"]
+        for row_idx in range(h):
+            for col_idx in range(w):
+                if rows[row_idx][col_idx]:
                     px = x + col_idx
                     py = y + row_idx
                     if sweep_x is not None and color_active is not None:
