@@ -41,17 +41,17 @@ with prefix `KV`, ID `11043315`, and the default filename schema, GhostTrax crea
 
 ```text
 KV11043315 - Ella Langley - I Gotta Quit.zip
-├── KV11043315 - Ella Langley - I Gotta Quit_music.mp3
-├── KV11043315 - Ella Langley - I Gotta Quit_vocals.mp3
+├── KV11043315 - Ella Langley - I Gotta Quit.mp3
 ├── KV11043315 - Ella Langley - I Gotta Quit.cdg
+├── KV11043315 - Ella Langley - I Gotta Quit(vocals).mp3
 └── KV11043315 - Ella Langley - I Gotta Quit.txt
 ```
 
 File meanings:
 
-- `_music.mp3` — instrumental backing track, intended for playback at karaoke shows
-- `_vocals.mp3` — isolated vocal stem, useful for checking the transcription
+- `.mp3` — instrumental backing track, named exactly like the `.cdg` for karaoke-player compatibility
 - `.cdg` — synchronized karaoke graphics
+- `(vocals).mp3` — isolated vocal stem, useful for checking the transcription
 - `.txt` — detected lyrics as plain text
 
 ## Windows install
@@ -179,7 +179,7 @@ Install ffmpeg and make sure it is on PATH. Packaged Windows builds bundle ffmpe
 
 ### Lyrics are wrong
 
-Check the `_vocals.mp3` file. If the vocal isolation is messy, Whisper will hallucinate or miss words. Try a cleaner source file or a larger Whisper model.
+Check the `(vocals).mp3` file. If the vocal isolation is messy, Whisper will hallucinate or miss words. Try a cleaner source file or a larger Whisper model.
 
 ### Timing is a little off
 

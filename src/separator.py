@@ -73,6 +73,22 @@ def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', "_", name)
 
 
+def package_member_names(base_name: str) -> dict[str, str]:
+    """Return karaoke-player-compatible package filenames for a base song name.
+
+    Most CDG+MP3 players pair files by exact basename, so the instrumental
+    MP3 and CDG must be named `xxx.mp3` and `xxx.cdg`. The isolated vocal
+    reference track is kept alongside them with a suffix that will not be
+    mistaken for the playback MP3.
+    """
+    return {
+        "music": f"{base_name}.mp3",
+        "vocals": f"{base_name}(vocals).mp3",
+        "cdg": f"{base_name}.cdg",
+        "txt": f"{base_name}.txt",
+    }
+
+
 def ensure_wav(input_path: Path, work_dir: Path, ffmpeg: str) -> Path:
     """Convert input to 44.1kHz 16-bit stereo WAV for Demucs."""
     wav_path = work_dir / (sanitize_filename(input_path.stem) + "_converted.wav")
@@ -305,6 +321,8 @@ def make_karaoke_zip(
     base_name = build_output_name(artist, title, prefix, song_id, schema)
     base_name = sanitize_filename(base_name)
 
+    package_names = package_member_names(base_name)
+
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
 
@@ -315,8 +333,8 @@ def make_karaoke_zip(
         )
 
         # 2. Normalize to MP3
-        music_mp3 = work_dir / f"{base_name}_music.mp3"
-        vocals_mp3 = work_dir / f"{base_name}_vocals.mp3"
+        music_mp3 = work_dir / package_names["music"]
+        vocals_mp3 = work_dir / package_names["vocals"]
         normalize_to_mp3(music_wav, music_mp3, ffmpeg, progress_callback)
         normalize_to_mp3(vocals_wav, vocals_mp3, ffmpeg, progress_callback)
 
@@ -330,7 +348,7 @@ def make_karaoke_zip(
         if duration <= 0:
             duration = get_audio_duration(input_path, ffmpeg)
 
-        cdg_path = work_dir / f"{base_name}.cdg"
+        cdg_path = work_dir / package_names["cdg"]
         if words:
             build_cdg_from_words(words, duration, cdg_path)
         else:
@@ -339,9 +357,9 @@ def make_karaoke_zip(
 
         # 5. Write human-readable lyrics text file
         if words:
-            txt_path = write_lyrics_txt(words, work_dir / f"{base_name}.txt")
+            txt_path = write_lyrics_txt(words, work_dir / package_names["txt"])
         else:
-            txt_path = write_lyrics_txt([], work_dir / f"{base_name}.txt")
+            txt_path = write_lyrics_txt([], work_dir / package_names["txt"])
 
         # 6. Zip
         zip_path = output_dir / f"{base_name}.zip"
