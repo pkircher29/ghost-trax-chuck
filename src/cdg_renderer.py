@@ -97,9 +97,11 @@ def make_packet(command: int, instruction: int, data: bytes) -> bytes:
     return bytes(packet)
 
 
+_NOOP = bytes(24)
+
+
 def noop_packet() -> bytes:
-    """A valid CDG no-op packet (command 0, instruction 0)."""
-    return make_packet(0, 0, bytes(bytearray(16)))
+    return _NOOP
 
 
 def load_color_table_low(palette: List[Tuple[int, int, int]]) -> bytes:
@@ -255,14 +257,14 @@ class TrueTypeFontCache:
         return self.char_cache.get(ch, self.char_cache.get(" "))
 
 
-FONT_CACHE = TrueTypeFontCache()
+FONT_CACHE = TrueTypeFontCache(size=9, height=TILE_HEIGHT)
 
 
-def get_text_width(text: str) -> int:
+def get_text_width(text: str, scale: int = 1) -> int:
     width = 0
     for ch in text:
         width += FONT_CACHE.get_char_info(ch)["width"] + 1
-    return width
+    return width * scale
 
 
 class CdgCanvas:
@@ -287,19 +289,21 @@ class CdgCanvas:
             col_pixels = cols[col_idx]
             for row_idx in range(h):
                 if col_pixels[row_idx]:
-                    px = x + col_idx
-                    py = y + row_idx
-                    if sweep_x is not None and color_active is not None:
-                        c = color_active if px < sweep_x else color
-                    else:
-                        c = color
-                    self.set_pixel(px, py, c)
+                    for sx in range(scale):
+                        for sy in range(scale):
+                            px = x + col_idx * scale + sx
+                            py = y + row_idx * scale + sy
+                            if sweep_x is not None and color_active is not None:
+                                c = color_active if px < sweep_x else color
+                            else:
+                                c = color
+                            self.set_pixel(px, py, c)
 
     def draw_text(self, text: str, x: int, y: int, color: int, scale: int = 1, color_active: int | None = None, sweep_x: float | None = None):
         cx = x
         for ch in text:
             self.draw_char(ch, cx, y, color, scale, color_active, sweep_x)
-            cx += FONT_CACHE.get_char_info(ch)["width"] + 1
+            cx += (FONT_CACHE.get_char_info(ch)["width"] + 1) * scale
         return cx
 
     def get_tile(self, col: int, row: int) -> List[int]:
@@ -324,7 +328,7 @@ def wrap_words_into_lines(words: List[Word], max_pixels: int, scale: int = 1) ->
       * break after a long silence gap between words (>> 0.35 s)
       * otherwise fill to the pixel budget
     """
-    space_width = get_text_width(" ")
+    space_width = get_text_width(" ", scale)
     lines: List[Tuple[int, List[Word]]] = []
     current: List[Word] = []
     current_first = 0
@@ -337,7 +341,7 @@ def wrap_words_into_lines(words: List[Word], max_pixels: int, scale: int = 1) ->
         return gap > 0.35
 
     for idx, word in enumerate(words):
-        word_width = get_text_width(word.text)
+        word_width = get_text_width(word.text, scale)
 
         fits = not current or current_width + space_width + word_width <= max_pixels
         force_break = False
@@ -383,8 +387,6 @@ def _render_screen_canvas(
     if not words:
         return canvas
 
-    char_width = 6 * scale
-    space_width = 6 * scale
     line_height = TILE_HEIGHT * scale
 
     margin = SAFE_MARGIN_X
@@ -530,12 +532,12 @@ def _draw_line(
     margin: int = SAFE_MARGIN_X,
 ):
     """Draw one lyric line onto the canvas at the given y position, with a smooth sweep at time t."""
-    space_width = get_text_width(" ")
-    full_width = sum(get_text_width(w.text) for w in line_words)
+    space_width = get_text_width(" ", scale)
+    full_width = sum(get_text_width(w.text, scale) for w in line_words)
     full_width += max(0, len(line_words) - 1) * space_width
     x = max(margin, (SCREEN_W - full_width) // 2)
     for word_offset, word in enumerate(line_words):
-        w_width = get_text_width(word.text)
+        w_width = get_text_width(word.text, scale)
         
         # Calculate sweep coordinate for this word
         if t <= word.start:
@@ -559,20 +561,25 @@ def _emit_line_tiles(
     scale: int = 2,
     color0: int = 0,
 ) -> List[bytes]:
-    """Emit tile packets for a single line at time t."""
+    """Emit tile packets for a single line at time t and sync canvas."""
     temp = CdgCanvas()
     temp.clear(color0)
     _draw_line(temp, line_words, first_word_index, t, line_y, scale)
     packets = []
     start_row = line_y // TILE_HEIGHT
-    end_row = (line_y + 24 - 1) // TILE_HEIGHT
+    end_row = (line_y + TILE_HEIGHT * scale - 1) // TILE_HEIGHT
     for row in range(start_row, min(end_row + 1, TILES_V)):
+        y_base = row * TILE_HEIGHT
         for col in range(TILES_H):
             tile = temp.get_tile(col, row)
             old_tile = canvas.get_tile(col, row)
             if tile != old_tile:
                 color1 = _tile_foreground_color(tile, color0)
                 packets.append(set_tile(col, row, tile, color0, color1))
+        for ty in range(TILE_HEIGHT):
+            y = y_base + ty
+            if y < SCREEN_H:
+                canvas.pixels[y * SCREEN_W:(y + 1) * SCREEN_W] = temp.pixels[y * SCREEN_W:(y + 1) * SCREEN_W]
     return packets
 
 
@@ -664,16 +671,17 @@ def build_cdg_from_words(
                 packets = _emit_line_tiles(canvas, y, line_words, first_idx, 0.0, scale)
                 f.write(b"".join(packets))
                 packets_emitted += len(packets)
-                _draw_line(canvas, line_words, first_idx, 0.0, y, scale)
 
         packets_per_render = 10
 
         for packet_idx in range(0, total_packets, packets_per_render):
             t = packet_idx / PACKETS_PER_SECOND
 
-            while packets_emitted < packet_idx and packets_emitted < total_packets:
-                f.write(noop_packet())
-                packets_emitted += 1
+            pad_to = min(packet_idx, total_packets)
+            if packets_emitted < pad_to:
+                count = pad_to - packets_emitted
+                f.write(_NOOP * count)
+                packets_emitted += count
 
             current_word_index = _display_word_index_at_time(words, t, current_word_index)
             active_line = _active_line_index(words, current_word_index, all_lines)
@@ -701,7 +709,6 @@ def build_cdg_from_words(
                         packets = _emit_line_tiles(canvas, y, line_words, first_idx, t, scale)
                         f.write(b"".join(packets))
                         packets_emitted += len(packets)
-                        _draw_line(canvas, line_words, first_idx, t, y, scale)
 
             # Update colors on the active line (and any previous visible lines, but they are already blue)
             new_canvas = CdgCanvas()
@@ -715,9 +722,8 @@ def build_cdg_from_words(
             packets_emitted += len(diff)
             canvas = new_canvas
 
-        while packets_emitted < total_packets:
-            f.write(noop_packet())
-            packets_emitted += 1
+        if packets_emitted < total_packets:
+            f.write(_NOOP * (total_packets - packets_emitted))
 
     return output_path
 

@@ -40,6 +40,7 @@ from cdg_renderer import (
     clean_words_for_display,
     write_lyrics_txt,
 )
+import license_check
 
 
 def get_ffmpeg_path() -> str:
@@ -567,6 +568,7 @@ def run_gui():
 
 
 def main():
+    license_check.verify_license()
     # PyInstaller windowed builds set sys.stdout/stderr to None on Windows.
     # Redirect to a null writer so any library print() calls don't crash.
     if sys.stdout is None:

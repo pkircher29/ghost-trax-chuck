@@ -95,6 +95,17 @@ Run the GUI:
 python3 src/separator.py
 ```
 
+For playback, see the companion project [GhostTrax Player](https://github.com/pkircher29/ghost-trax-player).
+
+## Licensing & Authentication
+
+Ghost-Trax is a paid standalone program. On startup, it performs licensing checks:
+- It looks for local credentials at `~/.ghosttrax/license.json`.
+- If missing or invalid, the app displays a Tkinter login dialog (GUI mode) or command-line prompt (CLI mode) requesting your **Email** and **API Host Token** (copied from your Auto-KJ account dashboard).
+- The credentials are validated via the cloud server's `/api/verify-license` gateway. 
+- Authorized tiers include: `GHOST-TRAX` (standalone), `VIP PASS`, `VIP QUAD`, and `INFINITE PLAY` (lifetime).
+- Upon successful validation, the license state is cached locally in `~/.ghosttrax/license.json` for offline usage.
+
 Run from CLI:
 
 ```bash
