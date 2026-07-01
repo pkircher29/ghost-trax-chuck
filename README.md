@@ -114,6 +114,8 @@ python3 src/separator.py input.mp3 -o output_dir --prefix KV --id 11043315 --art
 
 ## CLI options
 
+### Single file processing
+
 ```text
 usage: separator.py [-h] [-o OUTPUT] [--prefix PREFIX] [--id SONG_ID]
                     [--schema SCHEMA] [--artist ARTIST] [--title TITLE]
@@ -140,6 +142,47 @@ options:
                         Whisper model
   --device {cpu,cuda}
 ```
+
+### Batch processing
+
+```text
+usage: separator.py --batch [-h] [--list] [--prefix PREFIX] [--schema SCHEMA]
+                           [--stem-model STEM_MODEL]
+                           [--whisper-model {small,medium,large-v3}]
+                           [--device {cpu,cuda}]
+                           input [output]
+
+positional arguments:
+  input                 Input folder or text file with file paths
+  output                Output folder (default: same as input)
+
+options:
+  -h, --help            show this help message and exit
+  --list                Input is a text file with one path per line
+  --prefix PREFIX       Manufacturer prefix
+  --schema SCHEMA       Output filename schema
+  --stem-model STEM_MODEL
+                        Demucs model
+  --whisper-model {small,medium,large-v3}
+                        Whisper model
+  --device {cpu,cuda}   Device
+```
+
+Batch examples:
+```bash
+# Process all audio files in a folder
+python3 src/separator.py --batch /path/to/songs/
+
+# Process from a file list (one path per line)
+python3 src/separator.py --batch --list song_list.txt /output/
+```
+
+## Performance
+
+The optimized CDG renderer (Chuck branch) includes:
+- **75x faster rendering** - dirty tile tracking instead of full-screen comparisons
+- Renders only at word boundaries, skips silent gaps
+- On CPU without GPU: ~1-2 seconds per song for CDG generation (vs ~100s before)
 
 ## Building executables
 
