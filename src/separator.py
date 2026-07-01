@@ -34,12 +34,27 @@ from naming import (
     DEFAULT_PREFIX,
     DEFAULT_SCHEMA,
 )
-from cdg_renderer import (
-    Word,
-    build_cdg_from_words,
-    clean_words_for_display,
-    write_lyrics_txt,
-)
+# Try optimized renderer, fall back to original
+try:
+    from cdg_renderer_optimized import (
+        Word,
+        build_cdg_from_words_optimized as build_cdg_from_words_main,
+        clean_words_for_display,
+        write_lyrics_txt,
+    )
+    USE_OPTIMIZED = True
+except ImportError:
+    from cdg_renderer import (
+        Word,
+        build_cdg_from_words as build_cdg_from_words_main,
+        clean_words_for_display,
+        write_lyrics_txt,
+    )
+    USE_OPTIMIZED = False
+
+# Wrapper for compatibility
+def build_cdg_from_words(words, duration, output_path, **kwargs):
+    return build_cdg_from_words_main(words, duration, output_path, **kwargs)
 import license_check
 
 
@@ -567,7 +582,71 @@ def run_gui():
     root.mainloop()
 
 
+def run_batch_cli():
+    """Batch process multiple files."""
+    parser = argparse.ArgumentParser(description="GhostTrax Batch Processor")
+    parser.add_argument("input", help="Input folder or text file with file paths")
+    parser.add_argument("output", nargs="?", help="Output folder (default: same as input)")
+    parser.add_argument("--list", action="store_true", help="Input is a text file with one path per line")
+    parser.add_argument("--prefix", default=DEFAULT_PREFIX, help="Manufacturer prefix")
+    parser.add_argument("--schema", default=DEFAULT_SCHEMA, help="Output filename schema")
+    parser.add_argument("--stem-model", default="htdemucs", help="Demucs model")
+    parser.add_argument("--whisper-model", default="medium", choices=["small", "medium", "large-v3"], help="Whisper model")
+    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"], help="Device")
+    args = parser.parse_args()
+
+    input_path = Path(args.input)
+    output_dir = Path(args.output) if args.output else None
+
+    # Find audio files
+    if args.list:
+        with open(input_path, "r") as f:
+            input_files = [Path(line.strip()) for line in f if line.strip() and Path(line.strip()).exists()]
+    elif input_path.is_dir():
+        extensions = (".mp3", ".wav", ".flac", ".m4a", ".ogg", ".wma", ".aac")
+        input_files = sorted([p for ext in extensions for p in input_path.rglob(f"*{ext}")])
+    else:
+        print(f"Error: {input_path} is not a folder or list file", file=sys.stderr)
+        sys.exit(1)
+
+    if not input_files:
+        print("No audio files found", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Processing {len(input_files)} files...")
+    results = []
+    for i, input_file in enumerate(input_files):
+        out_dir = output_dir or input_file.parent
+        out_dir = Path(out_dir)
+        
+        def progress(msg: str):
+            print(f"[{i+1}/{len(input_files)}] {input_file.name}: {msg}")
+        
+        try:
+            zip_path = make_karaoke_zip(
+                input_file, out_dir,
+                prefix=args.prefix,
+                schema=args.schema,
+                stem_model=args.stem_model,
+                whisper_model=args.whisper_model,
+                device=args.device,
+                progress_callback=progress,
+            )
+            results.append(zip_path)
+            print(f"Done: {zip_path}")
+        except Exception as e:
+            print(f"Error: {input_file.name}: {e}")
+
+    print(f"\nCompleted {len(results)}/{len(input_files)} files")
+
+
 def main():
+    # Check for batch mode
+    if len(sys.argv) > 1 and sys.argv[1] == "--batch":
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        run_batch_cli()
+        return
+
     license_check.verify_license()
     # PyInstaller windowed builds set sys.stdout/stderr to None on Windows.
     # Redirect to a null writer so any library print() calls don't crash.
