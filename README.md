@@ -199,7 +199,7 @@ Manual Windows build outline:
 
 ```powershell
 python -m pip install --upgrade pip
-python -m pip install torch==2.6.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu
+python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple/
 python -m pip install demucs faster-whisper scipy pillow pyinstaller
 choco install nsis -y
 .\build-windows.bat
