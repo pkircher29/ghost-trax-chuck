@@ -5,6 +5,11 @@ setlocal
 
 cd /d "%~dp0"
 
+REM Install dependencies if not already installed
+python -m pip install --upgrade pip
+python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple --quiet
+python -m pip install demucs faster-whisper "scipy<1.15" pillow pyinstaller --quiet
+
 if not exist ffmpeg.exe (
     echo Downloading ffmpeg for Windows...
     powershell -Command "Invoke-WebRequest -Uri https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip"
