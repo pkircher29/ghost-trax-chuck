@@ -37,7 +37,7 @@ a = Analysis(
     [str(base_path / 'src' / 'separator.py')],
     pathex=[str(base_path), str(base_path / 'src')],
     binaries=[],
-    datas=[(str(remote_dir), 'demucs/remote'), (str(font_file), 'src/assets'), (str(font_license), 'src/assets')],
+    datas=[(str(remote_dir), 'demucs/remote'), (str(font_file), 'src/assets'), (str(font_license), 'src/assets'), (str(base_path / 'src' / 'cdg_renderer_optimized.py'), 'src')],
     hiddenimports=hiddenimports_common,
     hookspath=[],
     hooksconfig={},
